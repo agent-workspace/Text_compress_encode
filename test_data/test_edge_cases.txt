@@ -1,0 +1,28 @@
+This file tests edge cases!!!
+
+Multiple     spaces     between     words.
+	Tabs	between	words	too.
+
+Empty line above and below.
+
+Trailing whitespace at end of line:
+More trailing whitespace:
+
+Special characters: !@#$%^&*()_+-=[]{}|;:'",.<>?/~`
+
+Ellipsis… Em dash— En dash– Multiple exclamations!!! Multiple questions???
+
+Mixed punctuation!?!? And more…—!!!
+
+UPPERCASE WORDS and lowercase words and MixedCase words.
+
+Numbers: 123 456 789 0 1234567890
+
+Short.
+Very short line.
+Another short line.
+
+Long line with lots of repeated words to test compression: the the the the the the the the the the.
+
+CRLF line endings are preserved.
+This line has CRLF too.

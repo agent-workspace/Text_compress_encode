@@ -1,0 +1,34 @@
+Unicode Test File
+
+English: Hello, world!
+Spanish: ¡Hola, mundo!
+French: Bonjour le monde!
+German: Hallo Welt!
+Russian: Привет, мир!
+Japanese: こんにちは世界！
+Chinese: 你好世界！
+Arabic: مرحبا بالعالم!
+Hebrew: שלום עולם!
+
+Emojis: 😀 😃 😄 😁 🎉 🎊 ✨ 🌟 ⭐
+
+Math symbols: ∑ ∫ ∞ ≈ ≠ ± × ÷ √ ∂
+
+Currency: $ € £ ¥ ₹ ₽ ₩ ¢
+
+Accented characters: café, naïve, résumé, piñata, Zürich, Æsop
+
+Special Unicode spaces and characters:
+Non-breaking space: hello world
+Em space: hello world
+Zero-width space: hello​world
+
+Combining characters: é (e + combining acute)
+
+Box drawing: ┌─┬─┐
+             │ │ │
+             ├─┼─┤
+             │ │ │
+             └─┴─┘
+
+Greek: α β γ δ ε ζ η θ ι κ λ μ ν ξ ο π ρ σ τ υ φ χ ψ ω

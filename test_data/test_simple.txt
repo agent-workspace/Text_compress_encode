@@ -1,0 +1,12 @@
+Hello world! This is a simple test file.
+This file contains basic prose with punctuation.
+
+It has multiple paragraphs, and some repeated words like "the" and "is" and "test".
+The quick brown fox jumps over the lazy dog.
+The quick brown fox jumps over the lazy dog again!
+
+Testing... testing... one, two, three!
+Can you hear me? Yes, I can hear you!!!
+
+Some common words: the, is, and, but, or, for, with, from, that, this.
+More common words: the, is, and, but, or, for, with, from, that, this.
