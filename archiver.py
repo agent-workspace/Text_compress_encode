@@ -8,7 +8,7 @@ import struct
 import os
 from pathlib import Path
 from typing import List, Dict, Tuple
-from compressor import tokenize, build_frequency_dict, calculate_position_bytes, get_struct_format
+from compressor import tokenize, build_frequency_dict, encode_varint, decode_varint
 
 
 def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
@@ -59,14 +59,10 @@ def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
 
     # Build shared dictionary from all tokens
     dictionary = build_frequency_dict(all_tokens)
-    position_bytes = calculate_position_bytes(len(dictionary))
     token_to_position = {token: i for i, token in enumerate(dictionary)}
 
     # Start building archive
     result = bytearray()
-
-    # Add header byte
-    result.append(position_bytes)
 
     # Add shared dictionary
     for token in dictionary:
@@ -75,8 +71,6 @@ def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
     result.append(1)
 
     # Add file entries
-    struct_format = get_struct_format(position_bytes)
-
     for file_data in file_contents:
         # Filename length (2 bytes)
         filename_bytes = file_data['name'].encode('utf-8')
@@ -92,14 +86,10 @@ def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
         token_count = len(file_data['tokens'])
         result.extend(struct.pack('<I', token_count))
 
-        # Encoded tokens
+        # Encoded tokens using varint
         for token in file_data['tokens']:
             position = token_to_position.get(token, 0)
-            if position_bytes == 3:
-                packed = struct.pack('<I', position)
-                result.extend(packed[:3])
-            else:
-                result.extend(struct.pack('<' + struct_format, position))
+            result.extend(encode_varint(position))
 
     # Write archive
     with open(output, 'wb') as f:
@@ -118,25 +108,22 @@ def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
     }
 
 
-def _parse_archive_header(data: bytes) -> Tuple[int, List[str], int]:
+def _parse_archive_header(data: bytes) -> Tuple[List[str], int]:
     """
-    Parse archive header and extract position_bytes, dictionary, and data start position.
+    Parse archive header and extract dictionary and data start position.
 
     Args:
         data: Archive data bytes
 
     Returns:
-        Tuple of (position_bytes, dictionary, data_start_position)
+        Tuple of (dictionary, data_start_position)
     """
-    if len(data) < 2:
+    if len(data) < 1:
         raise ValueError("Invalid archive: too short")
-
-    # Read header byte
-    position_bytes = data[0]
 
     # Parse dictionary
     dictionary = []
-    i = 1
+    i = 0
     current_token = bytearray()
 
     while i < len(data):
@@ -151,7 +138,7 @@ def _parse_archive_header(data: bytes) -> Tuple[int, List[str], int]:
             current_token.append(byte)
         i += 1
 
-    return position_bytes, dictionary, i
+    return dictionary, i
 
 
 def list_archive(archive: Path) -> List[Dict]:
@@ -168,8 +155,7 @@ def list_archive(archive: Path) -> List[Dict]:
     with open(archive, 'rb') as f:
         data = f.read()
 
-    position_bytes, dictionary, i = _parse_archive_header(data)
-    struct_format = get_struct_format(position_bytes)
+    dictionary, i = _parse_archive_header(data)
 
     files = []
 
@@ -198,10 +184,18 @@ def list_archive(archive: Path) -> List[Dict]:
         token_count = struct.unpack('<I', data[i:i+4])[0]
         i += 4
 
-        # Skip encoded data
-        encoded_size = token_count * position_bytes
-        if i + encoded_size > len(data):
-            break
+        # Skip varint-encoded data by reading token_count varints
+        start_pos = i
+        for _ in range(token_count):
+            if i >= len(data):
+                break
+            try:
+                _, bytes_read = decode_varint(data, i)
+                i += bytes_read
+            except ValueError:
+                break
+
+        encoded_size = i - start_pos
 
         # Estimate decompressed size (rough estimate)
         estimated_size = token_count * 5  # Average token size estimate
@@ -212,8 +206,6 @@ def list_archive(archive: Path) -> List[Dict]:
             'estimated_size': estimated_size,
             'encoded_size': encoded_size
         })
-
-        i += encoded_size
 
     return files
 
@@ -232,8 +224,7 @@ def preview_file(archive: Path, filename: str) -> str:
     with open(archive, 'rb') as f:
         data = f.read()
 
-    position_bytes, dictionary, i = _parse_archive_header(data)
-    struct_format = get_struct_format(position_bytes)
+    dictionary, i = _parse_archive_header(data)
 
     # Find the file entry
     while i < len(data):
@@ -260,35 +251,33 @@ def preview_file(archive: Path, filename: str) -> str:
         token_count = struct.unpack('<I', data[i:i+4])[0]
         i += 4
 
-        # Calculate encoded data size
-        encoded_size = token_count * position_bytes
-
         if current_filename == filename:
-            # Found the file - decode it
+            # Found the file - decode it using varint
             result = []
-            end_pos = i + encoded_size
 
-            while i < end_pos and i < len(data):
-                if position_bytes == 3:
-                    if i + 3 > len(data):
-                        break
-                    packed = data[i:i+3] + b'\x00'
-                    position = struct.unpack('<I', packed)[0]
-                    i += 3
-                else:
-                    if i + position_bytes > len(data):
-                        break
-                    packed = data[i:i+position_bytes]
-                    position = struct.unpack('<' + struct_format, packed)[0]
-                    i += position_bytes
+            for _ in range(token_count):
+                if i >= len(data):
+                    break
+                try:
+                    position, bytes_read = decode_varint(data, i)
+                    i += bytes_read
 
-                if position < len(dictionary):
-                    result.append(dictionary[position])
+                    if position < len(dictionary):
+                        result.append(dictionary[position])
+                except ValueError:
+                    break
 
             return ''.join(result)
 
-        # Skip encoded data
-        i += encoded_size
+        # Skip varint-encoded data
+        for _ in range(token_count):
+            if i >= len(data):
+                break
+            try:
+                _, bytes_read = decode_varint(data, i)
+                i += bytes_read
+            except ValueError:
+                break
 
     raise ValueError(f"File '{filename}' not found in archive")
 

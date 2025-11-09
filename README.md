@@ -103,13 +103,16 @@ TextCompressor uses frequency-based dictionary encoding:
 
 2. **Frequency Analysis**: Tokens are sorted by frequency (most common first)
 
-3. **Binary Encoding**: Each token is replaced by its position in the frequency dictionary using fixed-length binary encoding
+3. **Variable-Length Encoding (Varint)**: Each token is replaced by its position in the frequency dictionary using efficient variable-length encoding:
+   - Positions 0-127: 1 byte
+   - Positions 128-16,383: 2 bytes
+   - Larger positions: 3+ bytes
+   - This eliminates wasteful null bytes and adapts to dictionary size!
 
 4. **Archive Format**:
    ```
-   [Header byte: N] - Number of bytes per position
    [Dictionary] - Tokens separated by chr(0), ended with chr(1)
-   [Encoded content] - Binary positions (N bytes each)
+   [Encoded content] - Varint-encoded token positions
    ```
 
 ### Multi-File Archives
@@ -213,12 +216,19 @@ Text_compress_encode/
 
 ### Binary Format
 
-- **Position bytes**: Automatically calculated based on dictionary size
-  - 1 byte: Up to 255 unique tokens
-  - 2 bytes: Up to 65,535 unique tokens
-  - 3-4 bytes: Up to 4,294,967,295 unique tokens
+- **Variable-length encoding (Varint)**: Token positions are encoded efficiently
+  - 1 byte: Positions 0-127 (most frequent tokens)
+  - 2 bytes: Positions 128-16,383
+  - 3 bytes: Positions 16,384-2,097,151
+  - 4+ bytes: Even larger dictionaries
+  - Uses 7 bits per byte for data, 1 bit for continuation flag
+  - **No wasteful null bytes!** Adapts to actual position values
 
-- **Encoding**: Little-endian byte order
+- **Benefits**:
+  - Frequent tokens (positions 0-127) use only 1 byte
+  - 25-50% smaller encoding for archives with 256+ unique tokens
+  - Eliminates the "every other byte is 0x00" problem
+
 - **Character encoding**: UTF-8 throughout
 
 ### Limitations

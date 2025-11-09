@@ -101,50 +101,85 @@ def build_frequency_dict(tokens: List[str]) -> List[str]:
     return [token for token, _ in sorted_tokens]
 
 
-def calculate_position_bytes(dictionary_size: int) -> int:
+def encode_varint(value: int) -> bytes:
     """
-    Calculate minimum bytes needed to encode dictionary positions.
+    Encode an integer using variable-length encoding (varint).
+
+    Uses 7 bits per byte for data, with the high bit as a continuation flag:
+    - High bit = 1: more bytes follow
+    - High bit = 0: last byte
+
+    This efficiently encodes small values in fewer bytes:
+    - 0-127: 1 byte
+    - 128-16383: 2 bytes
+    - 16384-2097151: 3 bytes
+    - etc.
 
     Args:
-        dictionary_size: Number of unique tokens in dictionary
+        value: Non-negative integer to encode
 
     Returns:
-        Number of bytes needed (1, 2, 3, or 4)
+        Variable-length encoded bytes
     """
-    if dictionary_size == 0:
-        return 1
+    if value < 0:
+        raise ValueError("Cannot encode negative values")
 
-    # Calculate minimum bytes: ceil(log2(size) / 8)
-    bits_needed = math.ceil(math.log2(dictionary_size + 1))
-    bytes_needed = math.ceil(bits_needed / 8)
+    result = bytearray()
 
-    # Cap at 4 bytes (supports up to ~4 billion unique tokens)
-    return min(bytes_needed, 4)
+    while value >= 0x80:  # While value needs more than 7 bits
+        # Take lower 7 bits and set continuation bit (0x80)
+        result.append((value & 0x7F) | 0x80)
+        value >>= 7
+
+    # Last byte: lower 7 bits, no continuation bit
+    result.append(value & 0x7F)
+
+    return bytes(result)
 
 
-def get_struct_format(position_bytes: int) -> str:
+def decode_varint(data: bytes, offset: int) -> Tuple[int, int]:
     """
-    Get struct format string for the given number of bytes.
+    Decode a variable-length encoded integer.
 
     Args:
-        position_bytes: Number of bytes (1, 2, 3, or 4)
+        data: Byte array containing encoded data
+        offset: Starting position in data
 
     Returns:
-        Struct format string ('B', 'H', or 'I')
+        Tuple of (decoded_value, bytes_consumed)
     """
-    if position_bytes == 1:
-        return 'B'  # unsigned char (0-255)
-    elif position_bytes == 2:
-        return 'H'  # unsigned short (0-65535)
-    elif position_bytes in (3, 4):
-        return 'I'  # unsigned int (0-4294967295)
-    else:
-        raise ValueError(f"Unsupported position_bytes: {position_bytes}")
+    value = 0
+    shift = 0
+    bytes_read = 0
+
+    while offset + bytes_read < len(data):
+        byte = data[offset + bytes_read]
+        bytes_read += 1
+
+        # Add the lower 7 bits to our value
+        value |= (byte & 0x7F) << shift
+
+        # If high bit is clear, we're done
+        if (byte & 0x80) == 0:
+            return value, bytes_read
+
+        shift += 7
+
+        # Safety check to prevent infinite loops
+        if bytes_read > 10:  # Max needed for 64-bit value
+            raise ValueError("Invalid varint encoding: too many bytes")
+
+    raise ValueError("Invalid varint encoding: incomplete")
 
 
 def encode(text: str, dictionary: List[str] = None) -> bytes:
     """
-    Compress text using frequency-based dictionary encoding.
+    Compress text using frequency-based dictionary encoding with variable-length positions.
+
+    Uses varint encoding for token positions, which efficiently encodes:
+    - Positions 0-127 in 1 byte
+    - Positions 128-16383 in 2 bytes
+    - Larger positions in 3+ bytes
 
     Args:
         text: Input text to compress
@@ -152,7 +187,9 @@ def encode(text: str, dictionary: List[str] = None) -> bytes:
 
     Returns:
         Compressed data as bytes with format:
-        [header_byte][dictionary][encoded_content]
+        [dictionary][encoded_content]
+        Dictionary: tokens separated by chr(0), ended with chr(1)
+        Encoded content: varint-encoded token positions
     """
     # Tokenize the text
     tokens = tokenize(text)
@@ -161,17 +198,11 @@ def encode(text: str, dictionary: List[str] = None) -> bytes:
     if dictionary is None:
         dictionary = build_frequency_dict(tokens)
 
-    # Calculate position bytes needed
-    position_bytes = calculate_position_bytes(len(dictionary))
-
     # Build dictionary lookup
     token_to_position = {token: i for i, token in enumerate(dictionary)}
 
     # Start building compressed data
     result = bytearray()
-
-    # Add header byte
-    result.append(position_bytes)
 
     # Add dictionary (tokens separated by chr(0), ended with chr(1))
     for token in dictionary:
@@ -179,16 +210,10 @@ def encode(text: str, dictionary: List[str] = None) -> bytes:
         result.append(0)
     result.append(1)
 
-    # Encode tokens as positions
-    struct_format = get_struct_format(position_bytes)
+    # Encode tokens as varint positions
     for token in tokens:
         position = token_to_position.get(token, 0)
-        if position_bytes == 3:
-            # Special handling for 3 bytes - pack as 4 bytes then take first 3
-            packed = struct.pack('<I', position)
-            result.extend(packed[:3])
-        else:
-            result.extend(struct.pack('<' + struct_format, position))
+        result.extend(encode_varint(position))
 
     return bytes(result)
 
@@ -203,15 +228,12 @@ def decode(data: bytes) -> str:
     Returns:
         Original text
     """
-    if len(data) < 2:
+    if len(data) < 1:
         raise ValueError("Invalid compressed data: too short")
-
-    # Read header byte
-    position_bytes = data[0]
 
     # Parse dictionary
     dictionary = []
-    i = 1
+    i = 0
     current_token = bytearray()
 
     while i < len(data):
@@ -228,28 +250,19 @@ def decode(data: bytes) -> str:
             current_token.append(byte)
         i += 1
 
-    # Decode content
+    # Decode content using varint
     result = []
-    struct_format = get_struct_format(position_bytes)
 
     while i < len(data):
-        if position_bytes == 3:
-            # Special handling for 3 bytes
-            if i + 3 > len(data):
-                break
-            # Pad to 4 bytes and unpack
-            packed = data[i:i+3] + b'\x00'
-            position = struct.unpack('<I', packed)[0]
-            i += 3
-        else:
-            if i + position_bytes > len(data):
-                break
-            packed = data[i:i+position_bytes]
-            position = struct.unpack('<' + struct_format, packed)[0]
-            i += position_bytes
+        try:
+            position, bytes_read = decode_varint(data, i)
+            i += bytes_read
 
-        if position < len(dictionary):
-            result.append(dictionary[position])
+            if position < len(dictionary):
+                result.append(dictionary[position])
+        except (ValueError, IndexError):
+            # End of data or corrupted
+            break
 
     return ''.join(result)
 
