@@ -6,10 +6,13 @@ A Python-based text compression tool with a tkinter GUI that uses frequency-base
 
 - **Lossless Compression**: 100% byte-perfect compression and decompression
 - **Smart Tokenization**: Preserves whitespace, line endings, and punctuation exactly
+- **Directory Support**: Archive entire folder structures with preserved hierarchy
 - **Multi-file Archives**: Compress multiple files with a shared dictionary for better compression
-- **User-Friendly GUI**: Easy-to-use tkinter interface
+- **Recursive Scanning**: Automatically includes all files in subdirectories
+- **User-Friendly GUI**: Easy-to-use tkinter interface with directory browser
 - **Archive Browser**: Preview and extract files without full extraction
 - **Unicode Support**: Full support for non-ASCII characters and emojis
+- **Variable-Length Encoding**: Efficient varint encoding eliminates wasteful null bytes
 
 ## Installation
 
@@ -35,9 +38,15 @@ python gui.py
 ```
 
 The GUI provides three main sections:
-1. **File Selection**: Add, remove, and manage files to compress
-2. **Operations**: Compress to archive or extract archives
+1. **File Selection**: Add files, add directories, remove, and clear selection
+2. **Operations**: Compress to archive or extract archives with compression stats
 3. **Archive Browser**: Browse, preview, and extract files from archives
+
+Features:
+- **Add Files**: Select individual text files
+- **Add Directory**: Browse and add entire directories (recursively scanned)
+- Archive browser shows file paths with directory structure
+- Extraction recreates original directory hierarchy
 
 ### Command Line Usage
 
@@ -65,6 +74,46 @@ print(f"Compressed {stats['file_count']} files")
 print(f"Original: {stats['original_size']:,} bytes")
 print(f"Compressed: {stats['compressed_size']:,} bytes")
 print(f"Ratio: {stats['ratio']*100:.1f}%")
+```
+
+#### Archive Entire Directories
+
+```python
+from pathlib import Path
+from archiver import create_archive
+
+# Archive entire directory (recursively scans all files)
+stats = create_archive([Path('my_project')], Path('project._t_'))
+
+print(f"Archived directory with {stats['file_count']} files")
+print(f"Compression ratio: {stats['ratio']*100:.1f}%")
+```
+
+#### Extract Archive (Preserves Directory Structure)
+
+```python
+from pathlib import Path
+from archiver import extract_all
+
+# Extract all files, recreating directory structure
+extracted = extract_all(Path('project._t_'), Path('output_dir'))
+print(f"Extracted {len(extracted)} files with directory structure")
+```
+
+#### Mixed Files and Directories
+
+```python
+from pathlib import Path
+from archiver import create_archive
+
+# Archive mix of individual files and directories
+paths = [
+    Path('file1.txt'),
+    Path('docs/'),          # Entire directory
+    Path('src/'),           # Another directory
+    Path('config.json')
+]
+stats = create_archive(paths, Path('mixed._t_'))
 ```
 
 #### Extract Archive

@@ -62,18 +62,18 @@ def cmd_decompress(args):
 
 
 def cmd_archive(args):
-    """Create an archive from multiple files."""
-    files = [Path(f) for f in args.files]
+    """Create an archive from files and/or directories."""
+    paths = [Path(f) for f in args.paths]
     output_path = Path(args.output)
 
-    # Check all files exist
-    missing = [f for f in files if not f.exists()]
+    # Check all paths exist
+    missing = [f for f in paths if not f.exists()]
     if missing:
-        print(f"Error: Files not found: {', '.join(str(f) for f in missing)}", file=sys.stderr)
+        print(f"Error: Paths not found: {', '.join(str(f) for f in missing)}", file=sys.stderr)
         return 1
 
     try:
-        stats = create_archive(files, output_path)
+        stats = create_archive(paths, output_path)
         ratio = stats['ratio'] * 100
 
         print(f"Archive created: {output_path}")
@@ -188,6 +188,9 @@ Examples:
   # Create archive from multiple files
   %(prog)s archive file1.txt file2.txt file3.txt -o archive._t_
 
+  # Create archive from entire directory (preserves structure)
+  %(prog)s archive my_project/ -o project.t_
+
   # List archive contents
   %(prog)s list archive._t_
 
@@ -218,8 +221,8 @@ Examples:
     decompress_parser.set_defaults(func=cmd_decompress)
 
     # Archive command
-    archive_parser = subparsers.add_parser('archive', help='Create archive from multiple files')
-    archive_parser.add_argument('files', nargs='+', help='Files to archive')
+    archive_parser = subparsers.add_parser('archive', help='Create archive from files and/or directories')
+    archive_parser.add_argument('paths', nargs='+', help='Files and/or directories to archive (directories are recursively scanned)')
     archive_parser.add_argument('-o', '--output', required=True, help='Output archive file')
     archive_parser.set_defaults(func=cmd_archive)
 

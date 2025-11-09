@@ -7,55 +7,118 @@ Handles creation and extraction of ._t_ archive files with shared dictionary.
 import struct
 import os
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
 from compressor import tokenize, build_frequency_dict, encode_varint, decode_varint
 
 
-def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
+def _collect_files(paths: List[Path], base_path: Path = None) -> List[Tuple[Path, str]]:
     """
-    Create a ._t_ archive from multiple text files with a shared dictionary.
+    Collect all text files from given paths (files and directories).
+
+    Args:
+        paths: List of file or directory paths
+        base_path: Base path for calculating relative paths (optional)
+
+    Returns:
+        List of tuples: (absolute_path, relative_path_in_archive)
+    """
+    collected = []
+
+    for path in paths:
+        if not path.exists():
+            raise ValueError(f"Path does not exist: {path}")
+
+        if path.is_file():
+            # Single file
+            if base_path:
+                # Calculate relative path from base
+                try:
+                    rel_path = path.relative_to(base_path)
+                except ValueError:
+                    # If not relative to base, just use filename
+                    rel_path = path.name
+            else:
+                # No base path, just use filename
+                rel_path = path.name
+
+            collected.append((path, str(rel_path)))
+
+        elif path.is_dir():
+            # Directory - recursively scan for all files
+            if not base_path:
+                base_path = path  # Use directory itself as base
+
+            for file_path in sorted(path.rglob('*')):
+                if file_path.is_file():
+                    # Calculate relative path from base directory
+                    rel_path = file_path.relative_to(base_path)
+                    collected.append((file_path, str(rel_path)))
+
+    return collected
+
+
+def create_archive(paths: Union[List[Path], List[str]], output: Path, base_path: Path = None) -> Dict[str, any]:
+    """
+    Create a ._t_ archive from files and/or directories with a shared dictionary.
+
+    Supports:
+    - Individual files
+    - Entire directories (recursively scanned)
+    - Mixed files and directories
+    - Preserves directory structure in archive
 
     Archive format:
-    [header_byte: chr(N)]
     [shared_dictionary: token + chr(0) + token + chr(0) + ... + chr(1)]
     [file_entry_1]
     [file_entry_2]
     ...
 
     Each file entry:
-    [filename_length: 2 bytes]
-    [filename: UTF-8 bytes]
+    [filepath_length: 2 bytes]
+    [filepath: UTF-8 bytes (relative path with directories)]
     [chr(2): separator]
     [token_count: 4 bytes]
-    [encoded_data: N bytes per token]
+    [encoded_data: varint-encoded token positions]
 
     Args:
-        files: List of Path objects for input files
+        paths: List of Path objects or strings for input files/directories
         output: Path object for output archive
+        base_path: Optional base path for calculating relative paths
 
     Returns:
         Dictionary with statistics (original_size, compressed_size, ratio, file_count)
     """
-    if not files:
-        raise ValueError("No files provided for archiving")
+    # Convert strings to Paths
+    path_list = [Path(p) if isinstance(p, str) else p for p in paths]
+
+    if not path_list:
+        raise ValueError("No paths provided for archiving")
+
+    # Collect all files from paths (handles directories recursively)
+    file_list = _collect_files(path_list, base_path)
+
+    if not file_list:
+        raise ValueError("No files found in provided paths")
 
     # Read all files and collect all tokens
     all_tokens = []
     file_contents = []
 
-    for file_path in files:
+    for file_path, rel_path in file_list:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 text = f.read()
                 tokens = tokenize(text)
                 file_contents.append({
-                    'name': file_path.name,
+                    'path': rel_path,  # Store relative path with directories
                     'text': text,
                     'tokens': tokens
                 })
                 all_tokens.extend(tokens)
         except Exception as e:
-            raise ValueError(f"Error reading {file_path}: {e}")
+            # Skip non-text files or unreadable files
+            print(f"Warning: Skipping {file_path}: {e}")
+            continue
 
     # Build shared dictionary from all tokens
     dictionary = build_frequency_dict(all_tokens)
@@ -72,12 +135,12 @@ def create_archive(files: List[Path], output: Path) -> Dict[str, any]:
 
     # Add file entries
     for file_data in file_contents:
-        # Filename length (2 bytes)
-        filename_bytes = file_data['name'].encode('utf-8')
-        result.extend(struct.pack('<H', len(filename_bytes)))
+        # File path length (2 bytes) - now includes directory structure
+        filepath_bytes = file_data['path'].encode('utf-8')
+        result.extend(struct.pack('<H', len(filepath_bytes)))
 
-        # Filename
-        result.extend(filename_bytes)
+        # File path (with directory structure)
+        result.extend(filepath_bytes)
 
         # Separator
         result.append(2)
@@ -288,10 +351,13 @@ def extract_from_archive(archive: Path, filename: str, output: Path) -> None:
 
     Args:
         archive: Path to ._t_ archive file
-        filename: Name of file to extract
+        filename: Relative path of file to extract (may include directories)
         output: Path for extracted file
     """
     content = preview_file(archive, filename)
+
+    # Create parent directories if they don't exist
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     with open(output, 'w', encoding='utf-8') as f:
         f.write(content)
@@ -299,14 +365,14 @@ def extract_from_archive(archive: Path, filename: str, output: Path) -> None:
 
 def extract_all(archive: Path, output_dir: Path) -> List[str]:
     """
-    Extract all files from archive to a directory.
+    Extract all files from archive to a directory, preserving directory structure.
 
     Args:
         archive: Path to ._t_ archive file
         output_dir: Directory path for extracted files
 
     Returns:
-        List of extracted filenames
+        List of extracted file paths (with directory structure)
     """
     # Create output directory if it doesn't exist
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -316,14 +382,14 @@ def extract_all(archive: Path, output_dir: Path) -> List[str]:
 
     extracted = []
     for file_info in files:
-        filename = file_info['name']
-        output_path = output_dir / filename
+        filepath = file_info['name']  # This may include directory paths
+        output_path = output_dir / filepath  # Preserves directory structure
 
         try:
-            extract_from_archive(archive, filename, output_path)
-            extracted.append(filename)
+            extract_from_archive(archive, filepath, output_path)
+            extracted.append(filepath)
         except Exception as e:
-            print(f"Warning: Failed to extract {filename}: {e}")
+            print(f"Warning: Failed to extract {filepath}: {e}")
 
     return extracted
 

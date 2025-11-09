@@ -63,11 +63,14 @@ class TextCompressorGUI:
         self.add_files_btn = ttk.Button(file_frame, text="Add Files", command=self._add_files)
         self.add_files_btn.grid(row=1, column=0, padx=(0, 5), sticky=tk.W)
 
+        self.add_directory_btn = ttk.Button(file_frame, text="Add Directory", command=self._add_directory)
+        self.add_directory_btn.grid(row=1, column=1, padx=5)
+
         self.remove_files_btn = ttk.Button(file_frame, text="Remove Selected", command=self._remove_selected)
-        self.remove_files_btn.grid(row=1, column=1, padx=5)
+        self.remove_files_btn.grid(row=1, column=2, padx=5)
 
         self.clear_files_btn = ttk.Button(file_frame, text="Clear All", command=self._clear_all)
-        self.clear_files_btn.grid(row=1, column=2, padx=(5, 0), sticky=tk.E)
+        self.clear_files_btn.grid(row=1, column=3, padx=(5, 0), sticky=tk.E)
 
         # === OPERATION PANEL ===
         op_frame = ttk.LabelFrame(main_frame, text="Operations", padding="5")
@@ -176,6 +179,23 @@ class TextCompressorGUI:
 
             self.last_directory = Path(files[0]).parent
             self._set_status(f"Added {len(files)} file(s)")
+            self._update_button_states()
+
+    def _add_directory(self):
+        """Add directory to selection list (recursively scanned)."""
+        directory = filedialog.askdirectory(
+            title="Select Directory",
+            initialdir=self.last_directory
+        )
+
+        if directory:
+            dir_path = Path(directory)
+            if dir_path not in self.selected_files:
+                self.selected_files.append(dir_path)
+                self.file_listbox.insert(tk.END, f"📁 {dir_path.name}/")
+
+            self.last_directory = dir_path.parent
+            self._set_status(f"Added directory: {dir_path.name}")
             self._update_button_states()
 
     def _remove_selected(self):
